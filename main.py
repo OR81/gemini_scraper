@@ -14,12 +14,9 @@ import threading
 import os
 import logging
 import uuid
-import re
 
 app = Flask(__name__)
 drivers = {}
-
-
 
 LOG_FILE = "responses_log.jsonl"
 log_lock = threading.Lock()
@@ -40,7 +37,7 @@ def write_log(entry: dict):
 def create_chrome_driver(headless: bool = False):
     options = Options()
     if headless:
-       #options.add_argument("--headless=new")
+        options.add_argument("--headless=new")
         options.add_argument("--enable-gpu")
         options.add_argument("--use-gl=swiftshader")
         options.add_argument("--disable-software-rasterizer")
@@ -93,7 +90,6 @@ def load_cookies_from_file(driver, file_path="cookies.json"):
     write_log({"action": "load_cookies", "status": "success", "added": success_count, "failed": fail_count})
     return True
 
-
 def normalize_version(v: str):
     if not v:
         return "Fast"
@@ -105,14 +101,14 @@ def normalize_version(v: str):
 def normalize_cards(c: str):
     if not c:
         return None
-    valid_cards = ["Create image", "Write", "Build", "Deep Research","Create Video", "Learn"]
+    valid_cards = ["Create image", "Write", "Build", "Deep Research", "Create Video", "Learn"]
     return c if c in valid_cards else None
 
 def switch_version(driver, version: str):
     try:
         wait = WebDriverWait(driver, 20)
         modal = wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//button[contains(@class,'input-area-switch') and .//span[normalize-space()='Fast']]")
+            (By.XPATH, "//button[contains(@class, 'input-area-switch') and contains(@class, 'mat-mdc-button-base')]")
         ))
         modal.click()
         if version == "Fast":
@@ -129,30 +125,32 @@ def switch_version(driver, version: str):
         write_log({"action": "switch_version", "status": "error", "version": version, "error": str(e)})
         return False
 
-def select_card(driver, card: str):
+def select_cards(driver, cards_payload: dict):
     xpath_map = {
-        "Create image": "//button[contains(@class, 'card-legacy') and contains(@aria-label, 'Create Image')]",
-        "ٌWrite":"//button[contains(@class, 'card-legacy') and contains(@aria-label, 'Write')]",
-        "Build": "//button[contains(@class, 'card-legacy') and contains(@aria-label, 'Build')]",
-        "Deep Research ": "//button[contains(@class, 'card-legacy') and contains(@aria-label, 'Deep Research')]",
-        "Create Video": "//button[contains(@class, 'card-legacy') and contains(@aria-label, 'Create Video')]",
-        "Learn": "//button[contains(@class, 'card-legacy') and contains(@aria-label, 'Learn')]",
+        "Create image": "//button[contains(@aria-label,'Create image')]",
+        "Create video": "//button[contains(@aria-label,'Create video')]",
+        "Write anything": "//button[contains(@aria-label,'Write anything')]",
+        "Help me learn": "//button[contains(@aria-label,'Help me learn')]",
+        "Boost my day": "//button[contains(@aria-label,'Boost my day')]",
     }
-    if card not in xpath_map:
-        write_log({"action": "select_card", "status": "warning", "message": f"Card '{card}' not recognized"})
-        return False
-    try:
-        element = WebDriverWait(driver, 20).until(
-            EC.element_to_be_clickable((By.XPATH, xpath_map[card]))
-        )
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
-        time.sleep(0.5)
-        element.click()
-        write_log({"action": "select_card", "status": "success", "card": card})
-        return True
-    except Exception as e:
-        write_log({"action": "select_card", "status": "error", "card": card, "error": str(e)})
-        return False
+    for key, enable in cards_payload.items():
+        if not enable:
+            continue
+        if key not in xpath_map:
+            write_log({
+                "action": "select_card",
+                "status": "warning",
+                "message": f"Card '{key}' not recognized"
+            })
+            continue
+        try:
+            element = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, xpath_map[key])))
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
+            time.sleep(0.3)
+            element.click()
+            write_log({"action": "select_card", "status": "success", "card": key})
+        except Exception as e:
+            write_log({"action": "select_card", "status": "error", "card": key, "error": str(e)})
 
 def check_forbidden_page(driver, url: str):
     page_source = driver.page_source.lower()
@@ -163,14 +161,13 @@ def check_forbidden_page(driver, url: str):
     else:
         write_log({"action": "check_forbidden", "status": "success", "url": url})
 
-def start_browser(headless=False):
-    driver = create_chrome_driver(headless=headless)
+def start_browser(headless=True):
+    driver = create_chrome_driver(headless=True)
     url = "https://gemini.google.com/app"
     driver.get(url)
     check_forbidden_page(driver, url)
     write_log({"action": "start_browser", "status": "success"})
     return driver
-
 
 def parse_cookie_table(cookie_str):
     cookies = []
@@ -186,7 +183,6 @@ def parse_cookie_table(cookie_str):
         path = parts[3]
         expires = parts[4]
 
-       
         try:
             expiry_ts = int(datetime.strptime(expires, "%Y-%m-%dT%H:%M:%S.%fZ").timestamp())
         except:
@@ -199,14 +195,11 @@ def parse_cookie_table(cookie_str):
             "path": path,
             "expiry": expiry_ts,
             "secure": parts[6].strip() == "✓",
-            "httpOnly": False, 
+            "httpOnly": False,
             "sameSite": parts[9].strip() if len(parts) > 9 and parts[9].strip() else "Lax",
         })
 
     return cookies
-
-
-
 
 @app.route("/update_cookies", methods=["POST"])
 def update_cookies_table():
@@ -221,39 +214,46 @@ def update_cookies_table():
 
     parsed = parse_cookie_table(cookies)
 
-    try:   
-       with open("cookies.json", "w", encoding="utf-8") as f:
-        json.dump(parsed, f, indent=4, ensure_ascii=False)
-        
+    try:
+        with open("cookies.json", "w", encoding="utf-8") as f:
+            json.dump(parsed, f, indent=4, ensure_ascii=False)
+
         write_log({"action": "update_cookies", "status": "written"})
-        return jsonify({"action":"write_new_cookies","status": "written"})
-    
+        return jsonify({"action": "write_new_cookies", "status": "written"})
+
     except Exception as e:
-        
         write_log({"action": "update_cookies", "status": "error", "error": str(e)})
         return jsonify({"error": str(e)}), 500
-        
-    
-
-    
-
-
 
 @app.route("/login_with_cookies", methods=["POST"])
 def login_with_cookies():
     data = request.get_json()
     version = normalize_version(data.get("version"))
-    card = normalize_cards(data.get("card"))
+    cards_payload = data.get("cards", {})
     session_id = uuid.uuid4().hex
     driver = None
     try:
         driver = start_browser(headless=False)
         drivers[session_id] = driver
+
         driver.get("https://gemini.google.com/app")
-        write_log({"action": "open_website", "status": "success", "session_id": session_id})
         load_cookies_from_file(driver)
+
+        try:
+            button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[@aria-label='Accept all']")))
+            if button:
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
+                driver.execute_script("arguments[0].click();", button)
+                write_log({"action": "accept_cookies", "status": "success", "session_id": session_id})
+            else:
+                write_log({"action": "accept_cookies", "status": "not_found", "session_id": session_id})
+        except Exception as e:
+            write_log({"action": "accept_cookies", "status": "error", "session_id": session_id, "error": str(e)})
+        write_log({"action": "open_website", "status": "success", "session_id": session_id})
+
         switch_version(driver, version)
-        select_card(driver, card)
+        select_cards(driver, cards_payload)
         write_log({"action": "login_with_cookies", "status": "success", "session_id": session_id})
         return jsonify({"status": "ok", "session_id": session_id})
     except Exception as e:
@@ -265,29 +265,21 @@ def login_with_cookies():
                 pass
             drivers.pop(session_id, None)
         return jsonify({"status": "error", "message": str(e), "session_id": session_id}), 500
-    
-  
-  
-  
+
 def check_driver_alive(driver):
     try:
         driver.title
         return True
     except:
         return False
-    
-    
-    
-def send_prompt_text(ask_gemini_box , text):
-    lines =text.split("\n")
-    for i , line in enumerate(lines):
+
+def send_prompt_text(ask_gemini_box, text):
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
         ask_gemini_box.send_keys(line)
-        if i < len(line) -1 :
-            ask_gemini_box.send_keys(Keys.SHIFT , Keys.ENTER)
-            
-    ask_gemini_box.send_keys(Keys.ENTER)        
-            
-              
+        if i < len(lines) - 1:
+            ask_gemini_box.send_keys(Keys.SHIFT, Keys.ENTER)
+    ask_gemini_box.send_keys(Keys.ENTER)
 
 @app.route("/send_prompt", methods=["POST"])
 def send_prompt():
@@ -302,26 +294,31 @@ def send_prompt():
             return jsonify({"error": "Prompt is required"}), 400
 
         driver = drivers.get(session_id)
-        
+
         if not check_driver_alive(driver):
             write_log({"action": "send_prompt", "status": "error", "session_id": session_id, "message": "Driver not active"})
             return jsonify({"error": "driver not active"}), 404
 
         wait = WebDriverWait(driver, 20)
-
-        ask_gemini_box = wait.until(EC.visibility_of_element_located(
-            (By.XPATH, '/html/body/chat-app/main/side-navigation-v2/bard-sidenav-container/bard-sidenav-content/div[2]/div/div[2]/chat-window/div/input-container/div/input-area-v2/div/div/div[1]/div/div/rich-textarea/div[1]/p')
-        ))
-        ask_gemini_box.click()
-        ask_gemini_box.clear()
-        send_prompt_text(ask_gemini_box, prompt)
-        time.sleep(1)
-
-        write_log({"action": "send_prompt", "status": "sent", "session_id": session_id})
+        for _ in range(5):
+            try:
+                ask_gemini_box = wait.until(EC.visibility_of_element_located(
+                    (By.XPATH, '/html/body/chat-app/main/side-navigation-v2/bard-sidenav-container/bard-sidenav-content/div[2]/div/div[2]/chat-window/div/input-container/div/input-area-v2/div/div/div[1]/div/div/rich-textarea/div[1]/p')
+                ))
+                ask_gemini_box.click()
+                ask_gemini_box.clear()
+                send_prompt_text(ask_gemini_box, prompt)
+                write_log({"action": "send_prompt", "status": "sent", "session_id": session_id})
+                break
+            except StaleElementReferenceException as e:
+                time.sleep(0.5)
+        else:
+            write_log({"action": "send_prompt", "status": "error", "session_id": session_id,
+                       "message": "Failed to find input box after retries"})
+            return jsonify({"status": "error", "message": "Failed to find input box"}), 500
 
         WAIT_ELEMENT = "//button[@data-test-id='copy-button' and @mattooltip='Copy response']"
 
-         
         while True:
             if not check_driver_alive(driver):
                 return jsonify({"status": "error", "message": "driver closed manually", "session_id": session_id}), 410
@@ -333,9 +330,7 @@ def send_prompt():
                 pass
             time.sleep(5)
 
-       
         text_part = driver.find_elements(By.XPATH, ".//p | .//h1 | .//h2 | .//h3 | .//h4")
-
         texts = []
         for el in text_part:
             try:
@@ -345,17 +340,13 @@ def send_prompt():
             except:
                 continue
 
-       
         def extract_codes(driver):
             codes = []
             wait = WebDriverWait(driver, 10)
-
-            for _ in range(5): 
+            for _ in range(5):
                 try:
                     wait.until(EC.presence_of_all_elements_located((By.TAG_NAME, "pre")))
-                    
                     blocks = driver.find_elements(By.TAG_NAME, "pre")
-
                     for block in blocks:
                         try:
                             code = block.text.strip()
@@ -363,12 +354,9 @@ def send_prompt():
                                 codes.append(code)
                         except StaleElementReferenceException:
                             continue
-
                     return codes
-
                 except:
                     time.sleep(1)
-
             return codes
 
         write_log({"action": "send_prompt", "status": "response_received", "session_id": session_id})
@@ -382,7 +370,6 @@ def send_prompt():
     except Exception as e:
         write_log({"action": "send_prompt", "status": "error", "session_id": session_id, "error": str(e)})
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/close_driver", methods=['POST'])
 def close_driver():
