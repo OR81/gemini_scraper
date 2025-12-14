@@ -1,15 +1,20 @@
 # gemini_scraper
 gemini scraper with python and selenium
 ### login:
-```
+
 curl --location 'http://127.0.0.1:8085/login_with_cookies' \
 --header 'Content-Type: application/json' \
 --data '{
-    "version": "Fast",
-    "card": "Write anything"
-}
-'
-```
+    "version":"Fast",
+    "cards":{
+        "Create image":true,
+        "Create video":false,
+        "Write anything":false,
+        "Help me learn":false,
+        "Boost my day":false
+    }
+
+}'
 
 ### send prompt:
 ```
@@ -35,3 +40,5 @@ curl --location 'http://127.0.0.1:8085/close_driver' \
     "session_id":"c0a9b4a81c044f91a4da35645779b983"
 }'
 ```
+
+
